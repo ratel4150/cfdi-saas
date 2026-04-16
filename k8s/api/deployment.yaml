@@ -1,0 +1,81 @@
+# File: k8s/api/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cfdi-api
+  namespace: cfdi-staging
+  labels:
+    app: cfdi-api
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cfdi-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1           # levanta 1 nuevo antes de bajar el viejo
+      maxUnavailable: 0     # nunca baja instancias sin tener reemplazo
+  template:
+    metadata:
+      labels:
+        app: cfdi-api
+        tier: backend
+    spec:
+      containers:
+        - name: cfdi-api
+          image: ghcr.io/tu-org/cfdi-api:latest
+          imagePullPolicy: IfNotPresent    # usa imagen local si existe
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: postgres://cfdi:$(POSTGRES_PASSWORD)@postgres:5432/cfdi_db
+            - name: REDIS_URL
+              value: redis://:$(REDIS_PASSWORD)@redis:6379
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cfdi-secrets
+                  key: POSTGRES_PASSWORD
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cfdi-secrets
+                  key: REDIS_PASSWORD
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cfdi-secrets
+                  key: ANTHROPIC_API_KEY
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cfdi-secrets
+                  key: JWT_SECRET
+          envFrom:
+            - configMapRef:
+                name: cfdi-config
+          resources:
+            requests:
+              memory: 128Mi
+              cpu: 100m
+            limits:
+              memory: 512Mi
+              cpu: 500m
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3

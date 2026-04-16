@@ -1,0 +1,22 @@
+# File: k8s/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cfdi-config
+  namespace: cfdi-staging
+data:
+  APP_ENV: staging
+  PORT: "8080"
+  RUST_LOG: info
+  DOMAIN: cfdi.local
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cfdi-config
+  namespace: cfdi-prod
+data:
+  APP_ENV: production
+  PORT: "8080"
+  RUST_LOG: info
+  DOMAIN: cfdi.tuempresa.com

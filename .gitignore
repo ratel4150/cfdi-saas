@@ -1,0 +1,15 @@
+# Secretos — nunca al repo
+secrets/
+.env.prod
+.env.local
+docker/nginx/ssl/
+
+# Rust build
+target/
+
+# Docker
+*.tar
+
+# Windows
+Thumbs.db
+desktop.ini

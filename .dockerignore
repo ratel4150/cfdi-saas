@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Rust build artifacts (los más pesados — hasta 10 GB)
+target/
+
+# Variables de entorno locales
+.env
+.env.local
+.env.*.local
+
+# Docs y configs de editor
+*.md
+.vscode/
+.idea/
+
+# Docker mismo
+Dockerfile*
+docker-compose*
+docker/
+
+# Node (si tienes frontend en el monorepo)
+node_modules/
+.next/

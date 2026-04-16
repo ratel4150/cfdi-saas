@@ -1,0 +1,16 @@
+# File: k8s/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cfdi-staging
+  labels:
+    app: cfdi-saas
+    env: staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cfdi-prod
+  labels:
+    app: cfdi-saas
+    env: production
