@@ -1,0 +1,95 @@
+# File: .github/workflows/ci.yml
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+
+  # ── Lint y formato ────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache de dependencias
+        uses: Swatinem/rust-cache@v2
+
+      - name: Verifica formato
+        run: cargo fmt --all -- --check
+
+      - name: Clippy — linter
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # ── Tests ─────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: lint
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: cfdi
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: cfdi_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache de dependencias
+        uses: Swatinem/rust-cache@v2
+
+      - name: Corre los tests
+        env:
+          DATABASE_URL: postgres://cfdi:test_password@localhost:5432/cfdi_test
+          REDIS_URL: redis://localhost:6379
+          RUST_LOG: debug
+        run: cargo test --all --verbose
+
+  # ── Auditoría de seguridad ─────────────────
+  audit:
+    name: Auditoría de dependencias
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Busca vulnerabilidades
+        run: cargo audit
