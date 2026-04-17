@@ -1,6 +1,23 @@
 [package]
 name = "cfdi-core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+anyhow      = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+
+# XML
+quick-xml = { version = "0.37", features = ["serialize"] }
+
+# Criptografía 100% Rust — sin dependencias del sistema
+sha2    = "0.10"
+base64  = "0.22"
+hex     = "0.4"
+rsa     = { version = "0.9", features = ["sha2"] }
+pkcs8   = { version = "0.10", features = ["pem"] }
+der     = "0.7"

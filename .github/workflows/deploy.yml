@@ -1,99 +1,36 @@
-# File: .github/workflows/deploy.yml
 name: Deploy a Kubernetes
 
 on:
-  workflow_run:
-    workflows: ["CD — Build y Push"]
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Ambiente'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      image_tag:
+        description: 'Tag de imagen'
+        required: true
+        default: 'latest'
 
 jobs:
-  deploy-staging:
-    name: Deploy a staging
+  info:
+    name: Info de deploy
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    environment: staging           # requiere aprobación manual en GitHub
-
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Configura kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: v1.29.0
-
-      - name: Configura kubeconfig
+      - name: Instrucciones de deploy local
         run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-      - name: Verifica conexión al cluster
-        run: kubectl cluster-info
-
-      - name: Actualiza imagen en staging
-        run: |
-          kubectl set image deployment/cfdi-api \
-            cfdi-api=ghcr.io/${{ github.repository }}:sha-${{ github.sha }} \
-            -n cfdi-staging
-
-      - name: Espera que el rollout termine
-        run: |
-          kubectl rollout status deployment/cfdi-api \
-            -n cfdi-staging \
-            --timeout=300s
-
-      - name: Verifica que los pods están healthy
-        run: |
-          kubectl get pods -n cfdi-staging
-          kubectl wait --for=condition=ready pod \
-            -l app=cfdi-api \
-            -n cfdi-staging \
-            --timeout=120s
-
-      - name: Smoke test — verifica que responde
-        run: |
-          kubectl port-forward service/cfdi-api 8080:80 -n cfdi-staging &
-          sleep 5
-          curl -f http://localhost:8080/health || exit 1
-          echo "Staging OK"
-
-  deploy-prod:
-    name: Deploy a producción
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    environment: production        # requiere aprobación manual en GitHub
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Configura kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: v1.29.0
-
-      - name: Configura kubeconfig
-        run: |
-          mkdir -p $HOME/.kube
-          echo "${{ secrets.KUBECONFIG_PROD }}" | base64 -d > $HOME/.kube/config
-          chmod 600 $HOME/.kube/config
-
-      - name: Actualiza imagen en producción
-        run: |
-          kubectl set image deployment/cfdi-api \
-            cfdi-api=ghcr.io/${{ github.repository }}:sha-${{ github.sha }} \
-            -n cfdi-prod
-
-      - name: Espera que el rollout termine
-        run: |
-          kubectl rollout status deployment/cfdi-api \
-            -n cfdi-prod \
-            --timeout=300s
-
-      - name: Verifica producción
-        run: |
-          kubectl get pods -n cfdi-prod
-          kubectl wait --for=condition=ready pod \
-            -l app=cfdi-api \
-            -n cfdi-prod \
-            --timeout=120s
+          echo "======================================"
+          echo "Deploy manual desde tu maquina local:"
+          echo "======================================"
+          echo ""
+          echo "kubectl set image deployment/cfdi-api \\"
+          echo "  cfdi-api=ghcr.io/ratel4150/cfdi-saas:${{ github.event.inputs.image_tag }} \\"
+          echo "  -n cfdi-${{ github.event.inputs.environment }}"
+          echo ""
+          echo "kubectl rollout status deployment/cfdi-api \\"
+          echo "  -n cfdi-${{ github.event.inputs.environment }}"
+          echo "======================================"
