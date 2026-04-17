@@ -1,3 +1,4 @@
+# File: crates/cfdi-core/Cargo.toml
 [package]
 name = "cfdi-core"
 version = "0.1.0"

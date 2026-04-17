@@ -1,26 +1,26 @@
-// File: crates/api/src/handlers/cfdi.rs
 use axum::{extract::{Extension, State}, Json};
 use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use cfdi_core::{
     Cfdi, Emisor, Receptor, Concepto, RegimenFiscal, UsoCfdi,
     xml::generador::generar_xml,
     crypto::sello::{generar_cadena_original, hash_sha256},
 };
-use crate::{error::ApiResult, middleware::auth::AuthUser, state::AppState};
-
-// ── Request / Response types ──────────────────────────────
+use cfdi_db::{CfdiRepository, EmisorRepository};
+use cfdi_db::repositories::cfdi::InsertarCfdiInput;
+use crate::{error::{ApiError, ApiResult}, middleware::auth::AuthUser, state::AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct EmitirCfdiRequest {
-    pub serie:             Option<String>,
-    pub folio:             Option<String>,
-    pub lugar_expedicion:  String,
-    pub receptor_rfc:      String,
-    pub receptor_nombre:   String,
-    pub receptor_cp:       String,
-    pub receptor_regimen:  String,
-    pub conceptos:         Vec<ConceptoRequest>,
-    pub con_carta_porte:   bool,
+    pub serie:            Option<String>,
+    pub folio:            Option<String>,
+    pub lugar_expedicion: String,
+    pub receptor_rfc:     String,
+    pub receptor_nombre:  String,
+    pub receptor_cp:      String,
+    pub receptor_regimen: String,
+    pub conceptos:        Vec<ConceptoRequest>,
+    pub con_carta_porte:  bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,32 +34,27 @@ pub struct ConceptoRequest {
 
 #[derive(Debug, Serialize)]
 pub struct EmitirCfdiResponse {
-    pub xml:              String,
-    pub cadena_original:  String,
-    pub hash_sha256:      String,
-    pub sub_total:        f64,
-    pub total:            f64,
-    pub estado:           String,
+    pub id:              String,
+    pub xml:             String,
+    pub cadena_original: String,
+    pub hash_sha256:     String,
+    pub sub_total:       f64,
+    pub total:           f64,
+    pub estado:          String,
 }
 
-// ── Handlers ──────────────────────────────────────────────
-
-/// POST /api/v1/cfdi/emitir
-/// Genera el XML del CFDI con cadena original y hash
 pub async fn emitir_cfdi(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
     Json(req): Json<EmitirCfdiRequest>,
 ) -> ApiResult<Json<EmitirCfdiResponse>> {
 
-    // Construye el emisor desde el RFC del token JWT
     let emisor = Emisor::new(
         &user.rfc,
         &user.org,
         RegimenFiscal::GeneralLeyPersonasMorales,
     )?;
 
-    // Construye el receptor
     let receptor = Receptor::new(
         &req.receptor_rfc,
         &req.receptor_nombre,
@@ -68,9 +63,7 @@ pub async fn emitir_cfdi(
         UsoCfdi::GastosEnGeneral,
     )?;
 
-    // Construye los conceptos
-    let conceptos: Vec<Concepto> = req.conceptos
-        .iter()
+    let conceptos: Vec<Concepto> = req.conceptos.iter()
         .map(|c| Concepto::nuevo_con_iva(
             &c.clave_prod_serv,
             &c.clave_unidad,
@@ -80,7 +73,6 @@ pub async fn emitir_cfdi(
         ))
         .collect();
 
-    // Genera el CFDI
     let cfdi = Cfdi::nuevo_ingreso(
         req.serie.as_deref(),
         req.folio.as_deref(),
@@ -92,15 +84,42 @@ pub async fn emitir_cfdi(
 
     let sub_total = cfdi.sub_total;
     let total     = cfdi.total;
+    let xml       = generar_xml(&cfdi)?;
+    let cadena    = generar_cadena_original(&xml)?;
+    let hash      = hash_sha256(&cadena);
 
-    // Genera el XML
-    let xml = generar_xml(&cfdi)?;
+    // Busca o crea el emisor en DB
+    let emisor_repo = EmisorRepository::new(state.inner.db.clone());
+    let emisor_id = emisor_repo
+        .insertar(&user.rfc, &user.org, "601", &req.lugar_expedicion)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    // Genera la cadena original y hash
-    let cadena = generar_cadena_original(&xml)?;
-    let hash   = hash_sha256(&cadena);
+    // Guarda el CFDI en DB
+    let cfdi_repo = CfdiRepository::new(state.inner.db.clone());
+    let cfdi_id = cfdi_repo
+        .insertar(InsertarCfdiInput {
+            emisor_id,
+            serie:             req.serie.clone(),
+            folio:             req.folio.clone(),
+            fecha:             Utc::now(),
+            tipo_comprobante:  "I".to_string(),
+            subtotal:          sub_total,
+            total,
+            moneda:            "MXN".to_string(),
+            receptor_rfc:      req.receptor_rfc.clone(),
+            receptor_nombre:   req.receptor_nombre.clone(),
+            receptor_cp:       req.receptor_cp.clone(),
+            receptor_uso_cfdi: "G03".to_string(),
+            xml_generado:      xml.clone(),
+            cadena_original:   cadena.clone(),
+            tiene_carta_porte: req.con_carta_porte,
+        })
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
     Ok(Json(EmitirCfdiResponse {
+        id: cfdi_id.to_string(),
         xml,
         cadena_original: cadena,
         hash_sha256: hash,
@@ -110,15 +129,49 @@ pub async fn emitir_cfdi(
     }))
 }
 
-/// GET /api/v1/cfdi
-/// Lista los CFDIs del emisor autenticado
 pub async fn listar_cfdi(
+    State(state): State<AppState>,
     Extension(user): Extension<AuthUser>,
-) -> Json<serde_json::Value> {
-    Json(serde_json::json!({
+) -> ApiResult<Json<serde_json::Value>> {
+    let emisor_repo = EmisorRepository::new(state.inner.db.clone());
+
+    let emisor = match emisor_repo.buscar_por_rfc(&user.rfc).await {
+        Ok(e) => e,
+        Err(_) => {
+            return Ok(Json(serde_json::json!({
+                "emisor": user.rfc,
+                "cfdis": [],
+                "total": 0,
+            })));
+        }
+    };
+
+    let cfdi_repo = CfdiRepository::new(state.inner.db.clone());
+    let total = cfdi_repo
+        .contar_por_emisor(emisor.id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    let cfdis = cfdi_repo
+        .listar_por_emisor(emisor.id, 1, 20)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+
+    Ok(Json(serde_json::json!({
         "emisor": user.rfc,
-        "cfdis": [],
-        "total": 0,
-        "mensaje": "Base de datos pendiente de conectar — Paso 15"
-    }))
+        "total":  total,
+        "cfdis":  cfdis.iter().map(|c| serde_json::json!({
+            "id":               c.id,
+            "uuid_sat":         c.uuid_sat,
+            "serie":            c.serie,
+            "folio":            c.folio,
+            "fecha":            c.fecha,
+            "tipo":             c.tipo_comprobante,
+            "subtotal":         c.subtotal.to_string(),
+            "total":            c.total.to_string(),
+            "receptor_rfc":     c.receptor_rfc,
+            "estado":           c.estado,
+            "carta_porte":      c.tiene_carta_porte,
+        })).collect::<Vec<_>>(),
+    })))
 }

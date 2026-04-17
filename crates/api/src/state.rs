@@ -1,5 +1,5 @@
-// File: crates/api/src/state.rs
 use std::sync::Arc;
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -10,10 +10,11 @@ pub struct Inner {
     pub jwt_secret: String,
     pub pac_token:  String,
     pub app_env:    String,
+    pub db:         PgPool,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub async fn new(db: PgPool) -> Self {
         Self {
             inner: Arc::new(Inner {
                 jwt_secret: std::env::var("JWT_SECRET")
@@ -22,6 +23,7 @@ impl AppState {
                     .unwrap_or_else(|_| "pac-token-dev".to_string()),
                 app_env: std::env::var("APP_ENV")
                     .unwrap_or_else(|_| "development".to_string()),
+                db,
             }),
         }
     }

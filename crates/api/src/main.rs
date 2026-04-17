@@ -1,4 +1,3 @@
-// File: crates/api/src/main.rs
 mod error;
 mod handlers;
 mod middleware;
@@ -10,7 +9,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() {
-    // Inicializa logging estructurado
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -19,10 +17,24 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // Carga variables de entorno
     dotenvy::dotenv().ok();
 
-    let state = AppState::new();
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| {
+            "postgres://cfdi:cfdi123@localhost:5432/cfdi_db".to_string()
+        });
+
+    // Conecta a PostgreSQL
+    let pool = cfdi_db::crear_pool(&database_url)
+        .await
+        .expect("No se pudo conectar a PostgreSQL");
+
+    // Corre migraciones automáticamente
+    cfdi_db::correr_migraciones(&pool)
+        .await
+        .expect("Error al correr migraciones");
+
+    let state = AppState::new(pool).await;
     let app   = routes::crear_router(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
